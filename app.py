@@ -95,7 +95,7 @@ def run_gemini_extraction(uploaded_files):
         with st.spinner("Gemini is processing the documents... This may take a moment."):
             response_text = ""
             for chunk in client.models.generate_content_stream(
-                model="gemini-2.0-flash-lite",
+                model="gemini-2.5-flash",
                 contents=[types.Content(role="user", parts=prompt_parts)],
                 config=generate_content_config,
             ):
