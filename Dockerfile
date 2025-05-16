@@ -10,6 +10,10 @@ COPY requirements.txt .
 # Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Create .streamlit directory and copy secrets.toml if it exists
+RUN mkdir -p /app/.streamlit
+COPY .streamlit/secrets.toml .streamlit/secrets.toml
+
 # Copy the application code
 COPY app.py .
 
