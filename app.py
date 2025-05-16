@@ -62,7 +62,7 @@ def run_gemini_extraction(uploaded_files):
                                  3. Extract the product name as 'sku_name' (e.g., PARACETAMOL 500MG TAB). \n
                                  If there are product names across the quotations with similar product names, they should be given a common sku_name and used in the output\
                                  Ex: (i) "GLUCONORM G 1" and "GLUCONORM G1" are the same product \n
-                                     (ii) "CONCOR 5" and "CONCOR AM 5" are the same product \n
+                                      \n
                                      etc.\n
                                  4. Ensure all numeric fields like MRP, Base Rate, and Discount are extracted as strings, exactly as they appear.\n5. Quantity ('qty_str') should be extracted as it appears (e.g., \"10+1\", \"20\").\n6. If a product appears in multiple documents, create a separate entry for each instance.\nExtract the data in the specified JSON schema including 'sku_name'."""),
         ]
