@@ -302,6 +302,8 @@ with st.sidebar:
                 if all_items:
                     unique_sku_names = sorted(list(set(item['sku_name'] for item in all_items)))
                     st.session_state.all_skus_from_pdfs = unique_sku_names
+                    # Preselect all SKUs after extraction
+                    st.session_state.selected_skus_for_comparison = unique_sku_names.copy()
                 else:
                     st.warning("No processable items found after initial parsing of Gemini data.")
             else:
@@ -355,7 +357,16 @@ if st.session_state.extracted_data and not st.session_state.all_skus_from_pdfs a
 if not st.session_state.comparison_df.empty:
     st.subheader("SKU Comparison Table")
     st.dataframe(st.session_state.comparison_df, use_container_width=True)
-    
+    # Download as CSV button
+    csv_buffer = BytesIO()
+    st.session_state.comparison_df.to_csv(csv_buffer)
+    csv_buffer.seek(0)
+    st.download_button(
+        label="Download Comparison as CSV",
+        data=csv_buffer,
+        file_name="sku_comparison_report.csv",
+        mime="text/csv"
+    )
     st.markdown("""
     **Calculation Notes:**
     *   **Effective Rate (for Best Deal Logic)** = (Paid Qty × (Base Rate × (1 - Supplier Base Discount%))) ÷ (Paid Qty + Free Qty)
