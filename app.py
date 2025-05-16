@@ -55,7 +55,12 @@ def run_gemini_extraction(uploaded_files):
         # Prepare prompt parts
         prompt_parts = [
             *file_uris_for_prompt,
-            types.Part.from_text(text="""These are PDF quotation files received by a company.\nInstructions:\n1. For each distinct product item listed in these documents, extract the following details.\n2. The 'sku_supplier' should be the name of the company providing the quotation (e.g., NARSINGH PHARMA, MEDIVISION, S. D. M. AGENCY).\n3. Extract the product name as 'sku_name' (e.g., PARACETAMOL 500MG TAB).\n4. Ensure all numeric fields like MRP, Base Rate, and Discount are extracted as strings, exactly as they appear.\n5. Quantity ('qty_str') should be extracted as it appears (e.g., \"10+1\", \"20\").\n6. If a product appears in multiple documents, create a separate entry for each instance.\nExtract the data in the specified JSON schema including 'sku_name'."""),
+            types.Part.from_text(text="""These are PDF quotation files received by a company.
+                                 \nInstructions:\n
+                                 1. For each distinct product item listed in these documents, extract the following details.\n
+                                 2. The 'sku_supplier' should be the name of the company providing the quotation (e.g., NARSINGH PHARMA, MEDIVISION, S. D. M. AGENCY).\n
+                                 3. Extract the product name as 'sku_name' (e.g., PARACETAMOL 500MG TAB). If there are product names across the quotations with similar product names, they should be given a common sku_name and used in the output\n
+                                 4. Ensure all numeric fields like MRP, Base Rate, and Discount are extracted as strings, exactly as they appear.\n5. Quantity ('qty_str') should be extracted as it appears (e.g., \"10+1\", \"20\").\n6. If a product appears in multiple documents, create a separate entry for each instance.\nExtract the data in the specified JSON schema including 'sku_name'."""),
         ]
 
         generate_content_config = types.GenerateContentConfig(
