@@ -55,10 +55,32 @@ def handle_extract_data(uploaded_files):
     st.session_state.selected_sku_names = []
     st.session_state.comparison_df = pd.DataFrame()
 
-    extracted_json_data = run_gemini_extraction(uploaded_files)
-    if extracted_json_data:
-        st.session_state.extracted_data = extracted_json_data
-        st.success(f"Successfully extracted data for {len(extracted_json_data)} items from Gemini!")
+    all_extracted_data = []
+    batch_size = 3
+    num_files = len(uploaded_files)
+
+    if num_files == 0:
+        st.warning("No files uploaded.")
+        return
+
+    st.info(f"Processing {num_files} files in batches of {batch_size}...")
+
+    for i in range(0, num_files, batch_size):
+        batch_files = uploaded_files[i : i + batch_size]
+        batch_number = (i // batch_size) + 1
+        st.write(f"Processing batch {batch_number} with {len(batch_files)} files...")
+
+        extracted_json_data = run_gemini_extraction(batch_files)
+
+        if extracted_json_data:
+            all_extracted_data.extend(extracted_json_data)
+            st.success(f"Successfully extracted data for {len(extracted_json_data)} items from batch {batch_number}.")
+        else:
+            st.warning(f"No data extracted from batch {batch_number}.")
+
+    if all_extracted_data:
+        st.session_state.extracted_data = all_extracted_data
+        st.success(f"Successfully extracted data for a total of {len(all_extracted_data)} items from all files!")
 
         # Preprocess and populate unique SKU names for selection
         processed_items = preprocess_data(st.session_state.extracted_data)
@@ -71,7 +93,7 @@ def handle_extract_data(uploaded_files):
         else:
             st.warning("No processable items found after initial parsing of Gemini data.")
     else:
-        st.error("Failed to extract data using Gemini or no data returned.")
+        st.error("Failed to extract data using Gemini or no data returned from any batch.")
 
 def handle_generate_comparison():
     """Handles the comparison table generation when the button is clicked."""
