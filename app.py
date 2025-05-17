@@ -56,20 +56,21 @@ def run_gemini_extraction(uploaded_files):
         prompt_parts = [
             *file_uris_for_prompt,
             types.Part.from_text(text="""These are PDF quotation files received by a company.
-                                 \nInstructions:\n
-                                 1. For each distinct product item listed in these documents, extract the following details.\n
-                                 2. The 'sku_supplier' should be the name of the company providing the quotation (e.g., NARSINGH PHARMA, MEDIVISION, S. D. M. AGENCY).\n
-                                 3. Extract the product name as 'sku_name' (e.g., PARACETAMOL 500MG TAB). \n
-                                 If there are product names across the quotations with similar product names, they should be given a common sku_name and used in the output\
-                                 Ex: (i) "GLUCONORM G 1" and "GLUCONORM G1" are the same product \n
-                                     (ii) "JANUMET 50/500" and "JANUMET 50/500 TAB" are the same product\n
-                                     (iii) "JUST TEAR E/D" and "JUST TEAR LUBRICANT E/D" are the same product\n
-                                     (iv) "SEROFLO 250 R/C", "SEROFLO 250 ROTA" and "SEROFLO 250 ROTACAP" are the same product\n
-                                     (v) "ATORVA 20MG TAB" and "ATORVA-20" are the same product\n
-                                 etc.\n
-                                 4. Ensure all numeric fields like MRP, Base Rate, and Discount are extracted as strings, exactly as they appear.\n
-                                 5. Quantity ('qty_str') should be extracted as it appears (e.g., \"10+1\", \"20\").\n6. If a product appears in multiple documents, create a separate entry for each instance.\n
-                                 Extract the data in the specified JSON schema including 'sku_name'."""),
+                                  \nInstructions:\n
+                                  1. For each distinct product item listed in these documents, extract the following details.\n
+                                  2. The 'sku_supplier' should be the name of the company providing the quotation (e.g., NARSINGH PHARMA, MEDIVISION, S. D. M. AGENCY).\n
+                                  3. Extract the product name as 'sku_name' (e.g., PARACETAMOL 500MG TAB). \n
+                                  If there are product names across the quotations with similar product names, they should be given a common sku_name and used in the output\
+                                  Ex: (i) "GLUCONORM G 1" and "GLUCONORM G1" are the same product \n
+                                      (ii) "JANUMET 50/500" and "JANUMET 50/500 TAB" are the same product\n
+                                      (iii) "JUST TEAR E/D" and "JUST TEAR LUBRICANT E/D" are the same product\n
+                                      (iv) "SEROFLO 250 R/C", "SEROFLO 250 ROTA" and "SEROFLO 250 ROTACAP" are the same product\n
+                                      (v) "ATORVA 20MG TAB" and "ATORVA-20" are the same product\n
+                                  etc.\n
+                                  4. Ensure all numeric fields like MRP, Base Rate, and Discount are extracted as strings, exactly as they appear.\n
+                                  5. Quantity ('qty_str') should be extracted as it appears (e.g., \"10+1\", \"20\").\n6. If a product appears in multiple documents, create a separate entry for each instance.\n
+                                  7. Extract the batch number for each item. This is typically labeled "Batch" and may look like "IAK0040", "24491211", or "JT-2412".\n
+                                  Extract the data in the specified JSON schema including 'sku_name'."""),
         ]
 
         generate_content_config = types.GenerateContentConfig(
@@ -89,6 +90,7 @@ def run_gemini_extraction(uploaded_files):
                                 "base_rate": genai.types.Schema(type=genai.types.Type.STRING),
                                 "base_discount_percent": genai.types.Schema(type=genai.types.Type.STRING),
                                 "qty_str": genai.types.Schema(type=genai.types.Type.STRING),
+                                "batch_number": genai.types.Schema(type=genai.types.Type.STRING),
                             },
                         ),
                     ),
@@ -204,6 +206,7 @@ def preprocess_data(raw_data_list):
             "eff_rate_display_column": eff_rate_disp,
             "eff_disc_display_column": eff_disc_disp,
             "comparison_eff_rate": comparison_rate,
+            "batch_number": item.get("batch_number", "N/A").strip(), # Include batch number
         })
     return processed_items
 
@@ -233,12 +236,13 @@ def generate_comparison_table(target_sku_names, all_processed_items, display_sup
                     row_dict[(supplier_name, "MRP")] = f"{item['mrp']:.2f}" if item['mrp'] is not None else "-"
                     row_dict[(supplier_name, "Base Rate")] = f"{item['base_rate']:.2f}" if item['base_rate'] is not None else "-"
                     row_dict[(supplier_name, "Eff. Rate")] = f"{item['eff_rate_display_column']:.2f}" if item['eff_rate_display_column'] is not None else "-"
-                    row_dict[(supplier_name, "Eff. Disc% ")] = f"{item['eff_disc_display_column']:.2f}" if item['eff_disc_display_column'] is not None else "-"
+                    row_dict[(supplier_name, "Eff. Disc% ")] = f"{item['eff_disc_display_column']:.2f} %" if item['eff_disc_display_column'] is not None else "-" # Format with %
                     row_dict[(supplier_name, "Qty")] = item["qty_display_str"]
                     row_dict[(supplier_name, "SKU Code")] = item["sku"]
+                    row_dict[(supplier_name, "Batch Number")] = item["batch_number"] # Add Batch Number
         for s_name in display_suppliers_order:
             if (s_name, "MRP") not in row_dict:
-                for col_name in ["MRP", "Base Rate", "Eff. Rate", "Eff. Disc% ", "Qty", "SKU Code"]:
+                for col_name in ["MRP", "Base Rate", "Eff. Rate", "Eff. Disc% ", "Qty", "SKU Code", "Batch Number"]: # Add Batch Number here too
                     row_dict[(s_name, col_name)] = "-"
 
         best_deal_text = "-"
@@ -250,7 +254,7 @@ def generate_comparison_table(target_sku_names, all_processed_items, display_sup
             ))
             if offers_for_this_sku[0]["comparison_eff_rate"] is not None and offers_for_this_sku[0]["comparison_eff_rate"] != float('inf'):
                 best_offer = offers_for_this_sku[0]
-                best_deal_text = f"{best_offer['supplier']} ({best_offer['qty_display_str']})"
+                best_deal_text = f"{best_offer['supplier']}" # Update Best Deal text to only show supplier
         row_dict[('Best Deal', '')] = best_deal_text
         output_data_rows.append(row_dict)
 
@@ -258,19 +262,19 @@ def generate_comparison_table(target_sku_names, all_processed_items, display_sup
         return pd.DataFrame()
 
     df = pd.DataFrame(output_data_rows)
-    
+
     column_tuples = [('SKU Name', '')]
     for supplier_name in display_suppliers_order:
         column_tuples.extend([
             (supplier_name, "MRP"), (supplier_name, "Base Rate"),
             (supplier_name, "Eff. Rate"), (supplier_name, "Eff. Disc% "),
-            (supplier_name, "Qty"), (supplier_name, "SKU Code")
+            (supplier_name, "Qty"), (supplier_name, "SKU Code"), (supplier_name, "Batch Number") # Add Batch Number column tuple
         ])
     column_tuples.append(('Best Deal', ''))
-    
+
     final_cols_index = pd.MultiIndex.from_tuples(column_tuples)
     df = df.reindex(columns=final_cols_index, fill_value="-")
-    
+
     if not df.empty:
         df = df.set_index(('SKU Name', ''))
         df.index.name = "SKU Name"
@@ -368,10 +372,36 @@ if st.session_state.extracted_data and not st.session_state.all_skus_from_pdfs a
     st.warning("Data was extracted by Gemini, but no SKUs could be identified for selection. Please check the raw data below or try with different/clearer PDFs.")
 
 
+# Function to apply styling
+def highlight_best_deal(row):
+    # Assuming 'Best Deal' is the column indicating the best offer supplier name
+    # The column name is a tuple ('Best Deal', '')
+    styles = [''] * len(row)
+    best_deal_supplier = row[('Best Deal', '')]
+
+    if best_deal_supplier != "-":
+        # Get the column index for the best deal supplier's columns
+        try:
+            supplier_col_indices = [
+                i for i, col_tuple in enumerate(row.index)
+                if isinstance(col_tuple, tuple) and col_tuple[0] == best_deal_supplier
+            ]
+            # Apply green background to all cells in those columns for the current row
+            for i in supplier_col_indices:
+                styles[i] = 'background-color: #e0ffe0' # Light green
+        except Exception as e:
+            # Log or handle potential errors in identifying columns
+            print(f"Error applying styling: {e}") # Simple print for debugging
+
+    return styles
+
 if not st.session_state.comparison_df.empty:
     st.subheader("SKU Comparison Table")
-    st.dataframe(st.session_state.comparison_df, use_container_width=True)
-    # Download as CSV button
+    # Apply styling to the dataframe directly
+    styled_df = st.session_state.comparison_df.style.apply(highlight_best_deal, axis=1)
+    st.dataframe(styled_df, use_container_width=True)
+
+    # Download as CSV button (use the original dataframe without styling)
     csv_buffer = BytesIO()
     st.session_state.comparison_df.to_csv(csv_buffer)
     csv_buffer.seek(0)
