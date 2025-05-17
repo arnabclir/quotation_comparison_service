@@ -5,18 +5,10 @@ from models import ProcessedSkuItem # Import the data model
 
 # --- SKU Comparison Logic (adapted from previous script) ---
 
-def parse_quantity_string(qty_str: Optional[str]) -> tuple[int, int]:
-    """Parses quantity string like '16+0', '15', '32+8' into (paid_qty, free_qty)."""
-    if not qty_str: return 0, 0
-    qty_str = str(qty_str).strip()
-    match_plus = re.match(r'(\d+)\s*\+\s*(\d+)', qty_str)
-    if match_plus:
-        return int(match_plus.group(1)), int(match_plus.group(2))
-    match_single = re.match(r'(\d+)', qty_str)
-    if match_single:
-        return int(match_single.group(1)), 0
-    # Note: Streamlit warnings removed as this is a backend processing module
-    return 0, 0 # Default if parsing fails
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def calculate_item_metrics(base_rate: Optional[float], base_discount_percent: Optional[float], paid_qty: int, free_qty: int) -> tuple[Optional[float], Optional[float], Optional[float]]:
     """Calculates effective rate, effective discount, and comparison rate."""
@@ -49,8 +41,21 @@ def preprocess_data(raw_data_list: List[Dict[str, Any]]) -> List[ProcessedSkuIte
         # Use .get() with default values for robustness
         sku_name = item.get("sku_name", "UNKNOWN_SKU_NAME").strip()
         sku_as_extracted = item.get("sku_invoice", "UNKNOWN_SKU").strip()
-        qty_str = item.get("qty_str")
-        paid_qty, free_qty = parse_quantity_string(qty_str)
+
+        # Get paid_qty and free_qty directly from raw data, with error handling and logging
+        paid_qty = item.get("paid_qty")
+        free_qty = item.get("free_qty")
+
+        if paid_qty is None or free_qty is None:
+             logging.warning(f"Missing paid_qty or free_qty for SKU '{sku_name}' from supplier '{item.get('sku_supplier', 'N/A')}'. Skipping item.")
+             continue
+
+        try:
+            paid_qty = int(paid_qty)
+            free_qty = int(free_qty)
+        except (ValueError, TypeError) as e:
+            logging.warning(f"Invalid paid_qty or free_qty (not integers) for SKU '{sku_name}' from supplier '{item.get('sku_supplier', 'N/A')}': {e}. Skipping item.")
+            continue
 
         try:
             # Convert string inputs from Gemini to float, handle missing discount
@@ -63,13 +68,26 @@ def preprocess_data(raw_data_list: List[Dict[str, Any]]) -> List[ProcessedSkuIte
             base_discount_percent = float(discount_str) if discount_str else 0.0
 
         except (ValueError, TypeError) as e:
-            # Note: Streamlit warnings removed, consider logging or alternative error handling
-            print(f"Data conversion error for SKU '{sku_name}' from supplier '{item.get('sku_supplier', 'N/A')}': {e}. Skipping item.")
-            continue
-            
-        if paid_qty == 0 and free_qty == 0:
+            logging.warning(f"Data conversion error for SKU '{sku_name}' from supplier '{item.get('sku_supplier', 'N/A')}': {e}. Skipping item.")
             continue
 
+        if paid_qty == 0 and free_qty == 0:
+            logging.info(f"Skipping item for SKU '{sku_name}' from supplier '{item.get('sku_supplier', 'N/A')}' as both paid_qty and free_qty are zero.")
+            continue
+
+        # Get amount and calculate calculated_rate_per_qty
+        amount = item.get("amount")
+        calculated_rate_per_qty = None
+        total_qty = paid_qty + free_qty
+
+        if amount is not None and total_qty > 0:
+            try:
+                calculated_rate_per_qty = float(amount) / total_qty
+            except (ValueError, TypeError) as e:
+                logging.warning(f"Invalid amount or quantity for rate calculation for SKU '{sku_name}' from supplier '{item.get('sku_supplier', 'N/A')}': {e}")
+                calculated_rate_per_qty = None # Ensure it's None on error
+
+        # Calculate existing metrics (Eff. Rate, Eff. Disc, Comparison Eff. Rate)
         eff_rate_disp, eff_disc_disp, comparison_rate = calculate_item_metrics(
             base_rate, base_discount_percent, paid_qty, free_qty
         )
@@ -82,12 +100,14 @@ def preprocess_data(raw_data_list: List[Dict[str, Any]]) -> List[ProcessedSkuIte
             base_rate=base_rate,
             paid_qty=paid_qty,
             free_qty=free_qty,
-            qty_display_str=f"{paid_qty}+{free_qty}",
+            qty_display_str=f"{paid_qty}+{free_qty}", # Keep display string format
             eff_rate_display_column=eff_rate_disp,
             eff_disc_display_column=eff_disc_disp,
-            comparison_eff_rate=comparison_rate,
+            comparison_eff_rate=comparison_rate, # Keep for now, will remove later
+            calculated_rate_per_qty=calculated_rate_per_qty, # Add the new calculated rate
             batch_number=item.get("batch_number", "N/A").strip(), # Include batch number
         ))
+    logging.info(f"Successfully processed {len(processed_items)} SKU items.")
     return processed_items
 
 def get_supplier_unique_sku_counts(all_processed_items: List[ProcessedSkuItem]) -> Dict[str, int]:
@@ -122,20 +142,23 @@ def generate_comparison_table(target_sku_names: List[str], all_processed_items: 
                     row_dict[(supplier_name, "Qty")] = item.qty_display_str
                     row_dict[(supplier_name, "SKU Code")] = item.sku
                     row_dict[(supplier_name, "Batch Number")] = item.batch_number # Add Batch Number
+                    row_dict[(supplier_name, "Calc. Rate/Qty")] = f"{item.calculated_rate_per_qty:.2f}" if item.calculated_rate_per_qty is not None else "-" # Add Calculated Rate/Qty
         for s_name in display_suppliers_order:
             if (s_name, "MRP") not in row_dict:
-                for col_name in ["MRP", "Base Rate", "Eff. Rate", "Eff. Disc% ", "Qty", "SKU Code", "Batch Number"]: # Add Batch Number here too
+                for col_name in ["MRP", "Base Rate", "Eff. Rate", "Eff. Disc% ", "Qty", "SKU Code", "Batch Number", "Calc. Rate/Qty"]: # Add Calculated Rate/Qty here too
                     row_dict[(s_name, col_name)] = "-"
 
         best_deal_text = "-"
         if offers_for_this_sku:
-            # Sort by comparison_eff_rate, then paid_qty, then supplier unique count (desc)
+            # Sort by calculated_rate_per_qty (ascending), then paid_qty (ascending), then supplier unique count (desc)
+            # Treat None calculated_rate_per_qty as the worst (highest value)
             offers_for_this_sku.sort(key=lambda x: (
-                x.comparison_eff_rate if x.comparison_eff_rate is not None else float('inf'),
+                x.calculated_rate_per_qty if x.calculated_rate_per_qty is not None else float('inf'),
                 x.paid_qty,
                 -supplier_unique_counts.get(x.supplier, 0)
             ))
-            if offers_for_this_sku[0].comparison_eff_rate is not None and offers_for_this_sku[0].comparison_eff_rate != float('inf'):
+            # Check if the best offer has a valid calculated_rate_per_qty
+            if offers_for_this_sku[0].calculated_rate_per_qty is not None:
                 best_offer = offers_for_this_sku[0]
                 best_deal_text = f"{best_offer.supplier}" # Update Best Deal text to only show supplier
         row_dict[('Best Deal', '')] = best_deal_text
@@ -151,7 +174,8 @@ def generate_comparison_table(target_sku_names: List[str], all_processed_items: 
         column_tuples.extend([
             (supplier_name, "MRP"), (supplier_name, "Base Rate"),
             (supplier_name, "Eff. Rate"), (supplier_name, "Eff. Disc% "),
-            (supplier_name, "Qty"), (supplier_name, "SKU Code"), (supplier_name, "Batch Number") # Add Batch Number column tuple
+            (supplier_name, "Qty"), (supplier_name, "SKU Code"), (supplier_name, "Batch Number"), # Add Batch Number column tuple
+            (supplier_name, "Calc. Rate/Qty") # Add Calculated Rate/Qty column tuple
         ])
     column_tuples.append(('Best Deal', ''))
 

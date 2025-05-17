@@ -11,7 +11,10 @@ class RawSkuItem:
     base_rate: Optional[str] = None
     base_discount_percent: Optional[str] = None
     qty_str: Optional[str] = None
+    paid_qty: Optional[int] = None
+    free_qty: Optional[int] = None
     batch_number: Optional[str] = None
+    amount: Optional[int] = None
 
 @dataclass
 class ProcessedSkuItem:
@@ -27,4 +30,5 @@ class ProcessedSkuItem:
     eff_rate_display_column: Optional[float] = None
     eff_disc_display_column: Optional[float] = None
     comparison_eff_rate: Optional[float] = None
+    calculated_rate_per_qty: Optional[float] = None
     batch_number: str = "N/A"

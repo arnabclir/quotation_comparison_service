@@ -7,6 +7,10 @@ from google import genai
 from google.genai import types
 from io import BytesIO
 import base64 # Although not directly used in the moved code, it was in the original block, keeping for now.
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # --- Gemini API Key Configuration ---
 # Ensure your GEMINI_API_KEY is set as an environment variable
@@ -62,9 +66,12 @@ def run_gemini_extraction(uploaded_files):
                                       (v) "ATORVA 20MG TAB" and "ATORVA-20" are the same product\n
                                   etc.\n
                                   4. Ensure all numeric fields like MRP, Base Rate, and Discount are extracted as strings, exactly as they appear.\n
-                                  5. Quantity ('qty_str') should be extracted as it appears (e.g., \"10+1\", \"20\").\n6. If a product appears in multiple documents, create a separate entry for each instance.\n
-                                  7. Extract the batch number for each item. This is typically labeled "Batch" and may look like "IAK0040", "24491211", or "JT-2412".\n
-                                  Extract the data in the specified JSON schema including 'sku_name'."""),
+                                  5. Extract the paid quantity as an integer in the 'paid_qty' field.\n
+                                  6. Extract the free quantity as an integer in the 'free_qty' field.\n
+                                  7. If a product appears in multiple documents, create a separate entry for each instance.\n
+                                  8. Extract the batch number for each item. This is typically labeled "Batch" and may look like "IAK0040", "24491211", or "JT-2412".\n
+                                  9. Extract the total price for the listed quantity of the SKU as an integer in the 'amount' field.\n
+                                  Extract the data in the specified JSON schema including 'sku_name', 'paid_qty', 'free_qty', and 'amount'."""),
         ]
 
         generate_content_config = types.GenerateContentConfig(
@@ -83,8 +90,10 @@ def run_gemini_extraction(uploaded_files):
                                 "mrp": genai.types.Schema(type=genai.types.Type.STRING),
                                 "base_rate": genai.types.Schema(type=genai.types.Type.STRING),
                                 "base_discount_percent": genai.types.Schema(type=genai.types.Type.STRING),
-                                "qty_str": genai.types.Schema(type=genai.types.Type.STRING),
+                                "paid_qty": genai.types.Schema(type=genai.types.Type.INTEGER),
+                                "free_qty": genai.types.Schema(type=genai.types.Type.INTEGER),
                                 "batch_number": genai.types.Schema(type=genai.types.Type.STRING),
+                                "amount": genai.types.Schema(type=genai.types.Type.INTEGER),
                             },
                         ),
                     ),
@@ -105,22 +114,26 @@ def run_gemini_extraction(uploaded_files):
         # Try to parse the JSON output
         try:
             json_data = json.loads(response_text)
+            logging.info("Successfully decoded JSON response from Gemini.")
             return json_data.get("sku_data", [])
         except json.JSONDecodeError as e:
-            st.error(f"Error decoding JSON response from Gemini: {e}")
-            st.text_area("Gemini Raw Response", response_text, height=200)
+            logging.error(f"Error decoding JSON response from Gemini: {e}")
+            st.error(f"Error decoding JSON response from Gemini. See logs for details.")
+            st.text_area("Gemini Raw Response (Decoding Error)", response_text, height=200)
             return None
         except Exception as e:
-            st.error(f"An unexpected error occurred while processing Gemini response: {e}")
-            st.text_area("Gemini Raw Response", response_text, height=200)
+            logging.error(f"An unexpected error occurred while processing Gemini response: {e}")
+            st.error(f"An unexpected error occurred while processing Gemini response. See logs for details.")
+            st.text_area("Gemini Raw Response (Processing Error)", response_text, height=200)
             return None
     except Exception as e:
-        st.error(f"An error occurred during Gemini processing: {e}")
+        logging.error(f"An error occurred during Gemini processing: {e}")
+        st.error(f"An error occurred during Gemini processing. See logs for details.")
         return None
     finally:
         # Clean up temp files
         for f in temp_files:
             try:
                 os.remove(f)
-            except Exception:
-                pass
+            except Exception as e:
+                logging.warning(f"Could not remove temporary file {f}: {e}")
