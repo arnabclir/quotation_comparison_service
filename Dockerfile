@@ -15,7 +15,7 @@ RUN mkdir -p /app/.streamlit
 COPY .streamlit/secrets.toml .streamlit/secrets.toml
 
 # Copy the application code
-COPY app.py .
+COPY . /app
 
 # Expose the Streamlit port
 EXPOSE 8501
