@@ -54,7 +54,7 @@ def render_file_uploader(uploaded_files: Optional[List[UploadedFile]], extract_h
     """Renders the file uploader and extract button in the sidebar."""
     st.header("Upload Quotation PDFs")
     new_uploaded_files = st.file_uploader(
-        "Choose PDF files", type="pdf", accept_multiple_files=True,
+        "Choose PDF files", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True,
         help="Upload one or more PDF quotation files."
     )
 

@@ -39,7 +39,8 @@ def run_gemini_extraction(uploaded_files):
         with st.spinner(f"Uploading {len(uploaded_files)} files to Gemini..."):
             for uploaded_file in uploaded_files:
                 # Save uploaded file to a temporary file
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                file_extension = os.path.splitext(uploaded_file.name)[1]
+                with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as tmp:
                     tmp.write(uploaded_file.getvalue())
                     temp_files.append(tmp.name)
                 # Upload file using file path (latest Gemini API)
