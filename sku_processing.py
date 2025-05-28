@@ -1,10 +1,9 @@
 import pandas as pd
 import re
 from typing import List, Dict, Any, Optional
-from models import ProcessedSkuItem # Import the data model
-
-# --- SKU Comparison Logic (adapted from previous script) ---
-
+from models import ProcessedSkuItem, SkuNameMapping, BatchSkuNameNormalization # Import the data model
+import instructor
+import openai # openai is a dependency of instructor
 import logging
 
 # Configure logging
@@ -126,13 +125,16 @@ def generate_comparison_table(target_sku_names: List[str], all_processed_items: 
     output_data_rows = []
     supplier_unique_counts = get_supplier_unique_sku_counts(all_processed_items)
 
-    for sku_name in target_sku_names:
+    for sku_name in target_sku_names: # sku_name is now the normalized name
         row_dict = {('SKU Name', ''): sku_name}
         offers_for_this_sku = []
+        original_sku_codes_for_this_normalized_name = set() # Use a set to store unique original codes
 
         for item in all_processed_items:
-            if item.sku_name == sku_name: # Compare by sku_name
+            if item.sku_name == sku_name: # item.sku_name is already normalized
                 offers_for_this_sku.append(item)
+                if item.sku: # Ensure item.sku is not None or empty before adding
+                    original_sku_codes_for_this_normalized_name.add(item.sku) # item.sku is the original invoice code
                 if item.supplier in display_suppliers_order:
                     supplier_name = item.supplier
                     row_dict[(supplier_name, "MRP")] = f"{item.mrp:.2f}" if item.mrp is not None else "-"
@@ -161,6 +163,10 @@ def generate_comparison_table(target_sku_names: List[str], all_processed_items: 
             if offers_for_this_sku[0].calculated_rate_per_qty is not None:
                 best_offer = offers_for_this_sku[0]
                 best_deal_text = f"{best_offer.supplier}" # Update Best Deal text to only show supplier
+        
+        # After processing all items for this sku_name:
+        row_dict[('Original SKUs', '')] = ", ".join(sorted(list(original_sku_codes_for_this_normalized_name)))
+
         row_dict[('Best Deal', '')] = best_deal_text
         output_data_rows.append(row_dict)
 
@@ -174,9 +180,10 @@ def generate_comparison_table(target_sku_names: List[str], all_processed_items: 
         column_tuples.extend([
             (supplier_name, "MRP"), (supplier_name, "Base Rate"),
             (supplier_name, "Eff. Rate"), (supplier_name, "Eff. Disc% "),
-            (supplier_name, "Qty"), (supplier_name, "SKU Code"), (supplier_name, "Batch Number"), # Add Batch Number column tuple
-            (supplier_name, "Calc. Rate/Qty") # Add Calculated Rate/Qty column tuple
+            (supplier_name, "Qty"), (supplier_name, "SKU Code"), (supplier_name, "Batch Number"), 
+            (supplier_name, "Calc. Rate/Qty") 
         ])
+    column_tuples.append(('Original SKUs', '')) # Add the new column header
     column_tuples.append(('Best Deal', ''))
 
     final_cols_index = pd.MultiIndex.from_tuples(column_tuples)
@@ -187,3 +194,116 @@ def generate_comparison_table(target_sku_names: List[str], all_processed_items: 
         df.index.name = "SKU Name"
 
     return df
+
+def normalize_sku_names(sku_names: List[str], client: instructor.Instructor) -> Dict[str, str]:
+    """
+    Normalizes a list of SKU names using an LLM call via the instructor library.
+
+    Args:
+        sku_names: A list of original SKU names.
+        client: An initialized instructor client (e.g., from OpenAI, Gemini, or another provider).
+                The client should be pre-configured with the desired model.
+
+    Returns:
+        A dictionary mapping original SKU names to their normalized forms.
+        Returns a dictionary mapping original names to themselves if normalization fails or sku_names is empty.
+    """
+    if not sku_names:
+        logging.info("normalize_sku_names: Received empty list of SKU names.")
+        return {}
+
+    # Process unique SKU names to avoid redundant calls and simplify LLM's task
+    unique_sku_names = sorted(list(set(sku_names)))
+    
+    prompt = f"""
+    You are an expert in pharmaceutical and FMCG product catalog management.
+    Your task is to normalize a list of SKU names. This means identifying SKUs
+    that refer to the same product despite minor variations in naming, dosage,
+    packaging, or brand names, and mapping them to a single, canonical/normalized name.
+
+    Consider the following aspects for normalization:
+    - Dosage information (e.g., "10mg", "500 MG", "0.5ML")
+    - Packaging type (e.g., "TAB", "TABLET", "CAP", "CAPSULE", "SYRUP", "INJ", "VIAL", "AMP")
+    - Brand variations vs. generic names (e.g., "Crocin" vs "Paracetamol", "PAN 40" vs "Pantoprazole 40mg")
+    - Minor spelling differences or abbreviations (e.g., "Vit" vs "Vitamin")
+    - Order of words (e.g., "XYZ 10ML SYP" vs "SYP XYZ 10ML")
+    - Include strength/volume even if the unit (mg/ml) is part of the name. E.g., "Test Syrup 100ml" -> "Test Syrup 100ml"
+
+    The goal is to group similar items under a consistent name.
+    For the normalized name, choose the most common, most complete, or a widely recognized generic/medical name.
+    If an item has multiple variations (e.g. "BrandX 10mg Tab" and "BrandX 10mg Tablet"), normalize them to one form (e.g. "BrandX 10mg Tablet").
+    If a generic name is appropriate and covers multiple brands, use that. E.g. "Pan 40mg Tab" and "Pantosec 40mg Tab" could both map to "Pantoprazole 40mg Tablet".
+    Ensure that the casing and spacing are consistent in the normalized output. For example, "PAN 40MG TAB" and "PAN 40 Mg Tablet" should map to a single form like "PANTOPRAZOLE 40MG TABLET".
+
+    Example Input List:
+    [
+        "PAN 40MG TAB",
+        "PAN 40 MG TABLET",
+        "PANTOSEC 40MG",
+        "CALPOL 500MG",
+        "CALPOL 500 TAB",
+        "CROCIN ADVANCE TAB",
+        "PARACETAMOL 500MG TAB",
+        "Azithromycin 250",
+        "AZITHRAL 250 TAB",
+        "AMOXYCLAV 625MG TAB",
+        "MOXIKIND CV 625"
+    ]
+
+    Desired Output Mappings (map original SKU name to normalized SKU name):
+    - "PAN 40MG TAB" -> "PANTOPRAZOLE 40MG TABLET"
+    - "PAN 40 MG TABLET" -> "PANTOPRAZOLE 40MG TABLET"
+    - "PANTOSEC 40MG" -> "PANTOPRAZOLE 40MG TABLET"
+    - "CALPOL 500MG" -> "CALPOL 500MG TABLET"
+    - "CALPOL 500 TAB" -> "CALPOL 500MG TABLET"
+    - "CROCIN ADVANCE TAB" -> "PARACETAMOL 500MG TABLET"
+    - "PARACETAMOL 500MG TAB" -> "PARACETAMOL 500MG TABLET"
+    - "Azithromycin 250" -> "AZITHROMYCIN 250MG TABLET" 
+    - "AZITHRAL 250 TAB" -> "AZITHROMYCIN 250MG TABLET"
+    - "AMOXYCLAV 625MG TAB" -> "AMOXICILLIN-CLAVULANATE 625MG TABLET"
+    - "MOXIKIND CV 625" -> "AMOXICILLIN-CLAVULANATE 625MG TABLET"
+
+    Please process the following list of SKU names and return the normalization mappings.
+    Ensure every original SKU name provided in the input list below has a corresponding mapping in your output.
+    Input SKU List:
+    {unique_sku_names}
+    """
+
+    try:
+        logging.info(f"normalize_sku_names: Sending {len(unique_sku_names)} unique SKU names for normalization (original list had {len(sku_names)} items).")
+        
+        response: BatchSkuNameNormalization = client.chat.completions.create(
+            messages=[{"role": "user", "content": prompt}],
+            response_model=BatchSkuNameNormalization,
+            # The 'model' parameter is typically set during client initialization or if the client is multi-model.
+            # e.g., model="gemini-1.5-flash-latest" or specific OpenAI/Qwen model name.
+        )
+
+        # Process the response, which contains mappings for unique_sku_names
+        temp_normalized_map = {}
+        if response and response.mappings:
+            for mapping in response.mappings:
+                # Ensure the original name from the mapping is one we sent
+                if mapping.original_sku_name in unique_sku_names:
+                    temp_normalized_map[mapping.original_sku_name] = mapping.normalized_sku_name
+            logging.info(f"normalize_sku_names: Received {len(temp_normalized_map)} valid mappings from LLM for {len(unique_sku_names)} unique SKUs.")
+        else:
+            logging.warning("normalize_sku_names: Normalization API call returned no mappings or an empty/invalid response.")
+
+        # Create the final map that maps all original SKU names (including duplicates)
+        # to their normalized form. If a unique SKU wasn't in the LLM response,
+        # or if normalization failed, it defaults to its original name.
+        final_sku_map = {}
+        for original_name in sku_names:
+            # Get the normalized name for its unique form, or default to original_name itself
+            # if its unique form wasn't mapped or if the unique form is the original_name.
+            normalized_name = temp_normalized_map.get(original_name, original_name)
+            final_sku_map[original_name] = normalized_name
+        
+        logging.info(f"normalize_sku_names: Final map contains {len(final_sku_map)} items, mapping all original SKUs.")
+        return final_sku_map
+
+    except Exception as e:
+        logging.error(f"normalize_sku_names: Error during SKU name normalization: {e}", exc_info=True)
+        # In case of any error, return a dict mapping all original names to themselves
+        return {name: name for name in sku_names}
