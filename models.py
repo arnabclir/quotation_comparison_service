@@ -32,3 +32,15 @@ class ProcessedSkuItem:
     comparison_eff_rate: Optional[float] = None
     calculated_rate_per_qty: Optional[float] = None
     batch_number: str = "N/A"
+
+from pydantic import BaseModel, Field
+from typing import List
+
+class SkuNameMapping(BaseModel):
+    """Represents a mapping from an original SKU name to its normalized form."""
+    original_sku_name: str = Field(description="The original SKU name extracted from the document")
+    normalized_sku_name: str = Field(description="The canonical or deduplicated form of the SKU name")
+
+class BatchSkuNameNormalization(BaseModel):
+    """Represents a batch of SKU name normalizations, mapping multiple original names to their canonical forms."""
+    mappings: List[SkuNameMapping] = Field(description="List of SKU name normalizations")
