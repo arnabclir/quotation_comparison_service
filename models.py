@@ -39,7 +39,12 @@ from typing import List
 class SkuNameMapping(BaseModel):
     """Represents a mapping from an original SKU name to its normalized form."""
     original_sku_name: str = Field(description="The original SKU name extracted from the document")
-    normalized_sku_name: str = Field(description="The canonical or deduplicated form of the SKU name")
+    normalized_sku_name: str = Field(description='''The canonical or deduplicated form of the SKU name  
+                                  Ex: (i) "GLUCONORM G 1" and "GLUCONORM G1" are the same product \n
+                                      (ii) "JANUMET 50/500" and "JANUMET 50/500 TAB" are the same product\n
+                                      (iii) "JUST TEAR E/D" and "JUST TEAR LUBRICANT E/D" are the same product\n
+                                      (iv) "SEROFLO 250 R/C", "SEROFLO 250 ROTA" and "SEROFLO 250 ROTACAP" are the same product\n
+                                      (v) "ATORVA 20MG TAB" and "ATORVA-20" are the same product\n''')
 
 class BatchSkuNameNormalization(BaseModel):
     """Represents a batch of SKU name normalizations, mapping multiple original names to their canonical forms."""
