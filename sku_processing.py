@@ -273,6 +273,7 @@ def normalize_sku_names(sku_names: List[str], client: instructor.Instructor) -> 
         logging.info(f"normalize_sku_names: Sending {len(unique_sku_names)} unique SKU names for normalization (original list had {len(sku_names)} items).")
         
         response: BatchSkuNameNormalization = client.chat.completions.create(
+            model = "qwen/qwen3-235b-a22b-07-25",
             messages=[{"role": "user", "content": prompt}],
             response_model=BatchSkuNameNormalization,
             # The 'model' parameter is typically set during client initialization or if the client is multi-model.

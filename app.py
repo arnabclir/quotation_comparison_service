@@ -39,7 +39,7 @@ if CHUTES_API_KEY:
     try:
         chutes_instructor_client = instructor.from_openai(
             OpenAI(
-                base_url="https://llm.chutes.ai/v1/",
+                base_url="https://openrouter.ai/api/v1",
                 api_key=CHUTES_API_KEY,
                 timeout=30.0, # Added timeout
             )
